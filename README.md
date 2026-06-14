@@ -1,6 +1,3 @@
-Penjelasan Kode Lengkap — KATANYA (Opsi A)
-
-Dokumen ini berisi penjelasan baris-per-baris untuk ketiga file utama di folder `front_end`:
 
 - `index.html` — struktur HTML aplikasi
 - `script.js`  — logika JavaScript klien

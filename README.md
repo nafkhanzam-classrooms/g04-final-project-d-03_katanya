@@ -3,8 +3,6 @@
 - `script.js`  — logika JavaScript klien
 - `style.css`  — gaya tampilan (CSS)
 
-Catatan: angka di depan setiap baris merujuk ke baris relatif dalam file asal.
-
 === index.html ===
 
 1 <!DOCTYPE html>

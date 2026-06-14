@@ -56,7 +56,6 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
 ### Layar autentikasi
 
 ```html
-<!-- AUTH SCREEN -->
 <div id="auth-screen">
   <div class="auth-box">
     <h1>KATANYA</h1>
@@ -70,7 +69,6 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
 </div>
 ```
 
-- `<!-- AUTH SCREEN -->` — Komentar HTML untuk penanda blok autentikasi.
 - `<div id="auth-screen">` — Kontainer layar login besar.
 - `<div class="auth-box">` — Kotak login dengan styling khusus.
 - `<h1>KATANYA</h1>` — Judul aplikasi.
@@ -84,7 +82,6 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
 ### Sidebar navigasi
 
 ```html
-<!-- SIDEBAR -->
 <div class="sidebar">
   <div class="logo">KATANYA</div>
   <div class="logo-sub">PvP ARENA</div>
@@ -114,7 +111,6 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
 ### Panel MATCH
 
 ```html
-<!-- MAIN -->
 <div class="main">
 
   <!-- MATCH -->
@@ -143,20 +139,16 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
 ### Panel ARENA
 
 ```html
-  <!-- ARENA & SPECTATE UI -->
   <div id="panel-arena" class="panel" style="max-width:940px;margin-top:20px">
     <div style="display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:16px;padding:0 4px">
-      <!-- P1 (Kamu) -->
       <div class="arena-header-col" style="text-align:left;">
         <div id="arena-my-tag" style="font-weight:700;color:var(--green);font-size:0.95rem">Kamu</div>
         <div id="arena-my-status" style="color:var(--red); font-size:0.8rem; display:none; margin-top:4px; font-weight: bold;">Terputus (60s)</div>
       </div>
-      <!-- Timer -->
       <div class="timer-wrap">
         <div id="timer-disp" class="timer-display">⏱ 05:00</div>
         <div class="timer-bar"><div id="timer-fill" class="timer-fill" style="width:100%"></div></div>
       </div>
-      <!-- P2 (Lawan) -->
       <div class="arena-header-col" style="text-align:right;">
         <div id="arena-opp-tag" style="font-weight:700;color:var(--gold);font-size:0.95rem">Lawan</div>
         <div id="arena-opp-status" style="color:var(--red); font-size:0.8rem; display:none; margin-top:4px; font-weight: bold;">Terputus (60s)</div>
@@ -178,7 +170,6 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
       </div>
     </div>
 
-    <!-- Live Chat -->
     <div class="chat-wrap" id="arena-chat">
         <div id="chat-box" class="chat-msgs"></div>
         <div class="chat-input-row">
@@ -198,7 +189,6 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
 ### Panel REPLAY
 
 ```html
-  <!-- REPLAY MATCH UI (NEW) -->
   <div id="panel-replay" class="panel" style="max-width:940px;margin-top:40px">
       <div class="card" style="padding:20px;">
         <h2 style="text-align:center; color:var(--gold); margin-bottom: 5px;">🎥 REPLAY PERTANDINGAN</h2>
@@ -229,7 +219,6 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
 ### Panel SPECTATE
 
 ```html
-  <!-- SPECTATE LIST -->
   <div id="panel-spectate" class="panel" style="margin-top:40px">
     <div class="card">
       <h2>👁️ Live Spectate</h2>
@@ -250,7 +239,6 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
 ### Panel DAILY
 
 ```html
-  <!-- DAILY -->
   <div id="panel-daily" class="panel" style="margin-top:40px">
     <div class="card">
       <h2>📅 Daily Quiz</h2>
@@ -269,7 +257,6 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
 ### Panel PRACTICE
 
 ```html
-  <!-- PRACTICE -->
   <div id="panel-practice" class="panel" style="margin-top:40px">
     <div class="card">
       <h2>🏋️ Mode Latihan</h2>
@@ -287,7 +274,6 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
 ### Panel RANK
 
 ```html
-  <!-- RANK -->
   <div id="panel-rank" class="panel" style="margin-top:40px">
     <div class="card">
       <h2>🏆 Leaderboard</h2>
@@ -305,7 +291,6 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
 ### Match Modal
 
 ```html
-<!-- MATCH MODAL -->
 <div id="match-modal">
   <div class="modal-box" id="modal-card">
     <div class="modal-icon"  id="m-icon">🏆</div>

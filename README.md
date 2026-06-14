@@ -1,3 +1,17 @@
+# Laporan Final Project Pemrograman Jaringan 
+
+| Nama           | NRP        | Kelas                |
+| ---            | ---        | ---         |
+| Hazza Danta Hermandanu               | 5025241117           | D              |
+| Cornelius Andika               | 5025241123           | D                   |
+
+--- 
+
+# Video Demo
+<https://index.html>
+
+---
+
 # KATANYA - Dokumentasi Front-End
 
 Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `style.css`.

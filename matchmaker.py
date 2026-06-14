@@ -1,77 +1,311 @@
-import os
+import asyncio
+import time
+import random
 import json
+from database import PLAYER_DB, update_mmr, get_or_create_player, DEFAULT_MMR
+from words import KBBI_LIST, evaluate_guess
 
-DB_FILE     = "katanya_users_db.json"
-K_FACTOR    = 32
-DEFAULT_MMR = 1000
+MATCH_DURATION_SECONDS = 300
+MAX_ATTEMPTS = 6
 
-PLAYER_DB: dict = {}
+class MatchmakingManager:
+    def __init__(self):
+        self.connections: dict = {}
+        self.queue: list[str] = []
+        self.rooms: dict[str, dict] = {}
+        self._timers: dict[str, asyncio.Task] = {}
 
-def load_db():
-    global PLAYER_DB
-    if os.path.exists(DB_FILE):
+    async def connect(self, ws, username: str):
+        self.connections[username] = ws
+        get_or_create_player(username)
+
+        room = self._find_active_room(username)
+        if room:
+            room["connected"][username] = True
+            dc_task = room["disconnect_task"].get(username)
+            if dc_task and not dc_task.done():
+                dc_task.cancel()
+
+            opp = self._opponent(room, username)
+            await self._send(opp, {"status": "opponent_reconnected", "player": username})
+            for s in room.get("spectators", []):
+                await self._send(s, {"status": "opponent_reconnected", "player": username})
+
+            elapsed = time.time() - room["start_ts"]
+            remaining = max(0, int(MATCH_DURATION_SECONDS - elapsed))
+            await self._send(username, {
+                "status": "match_start", 
+                "room_id": room["room_id"], 
+                "opponent": opp,
+                "my_mmr": PLAYER_DB.get(username, {}).get("mmr", DEFAULT_MMR),
+                "opp_mmr": PLAYER_DB.get(opp, {}).get("mmr", DEFAULT_MMR),
+                "duration": remaining,
+                "history_self": room["history"][username], 
+                "history_opp": room["history"][opp],
+                "is_reconnect": True
+            })
+            
+        for room_id, r in self.rooms.items():
+            if username in r.get("spectators", []) and not r.get("game_over"):
+                await self.spectate_room(username, room_id, ws)
+
+    def _find_active_room(self, username: str) -> dict | None:
+        for room in self.rooms.values():
+            if username in room["players"] and not room.get("game_over", False):
+                return room
+        return None
+
+    def _opponent(self, room: dict, username: str) -> str:
+        return next(p for p in room["players"] if p != username)
+
+    async def _send(self, username: str, msg: dict):
+        ws = self.connections.get(username)
+        if ws:
+            try: await ws.send(json.dumps(msg))
+            except Exception: pass
+
+    async def _broadcast(self, room: dict, msg: dict, include_spectators: bool = True):
+        for p in room["players"]:
+            await self._send(p, msg)
+        if include_spectators:
+            for s in room.get("spectators", []):
+                await self._send(s, msg)
+
+    async def join_queue(self, username: str):
+        if self._find_active_room(username): return
+        if username not in self.queue: self.queue.append(username)
+        await self._send(username, {"status": "searching"})
+
+        if len(self.queue) >= 2:
+            p1, p2 = self.queue.pop(0), self.queue.pop(0)
+            if p1 not in self.connections:
+                if p2 in self.connections: self.queue.insert(0, p2)
+                return
+            if p2 not in self.connections:
+                self.queue.insert(0, p1)
+                return
+            await self._start_match(p1, p2)
+
+    async def _start_match(self, p1: str, p2: str):
         try:
-            with open(DB_FILE, "r") as f:
-                PLAYER_DB = json.load(f)
-        except Exception:
-            PLAYER_DB = {}
-    else:
-        PLAYER_DB = {}
+            room_id = f"room_{p1}_{p2}_{int(time.time())}"
+            secret  = random.choice(KBBI_LIST) if KBBI_LIST else "UTAMA"
+            
+            mmr1 = PLAYER_DB.get(p1, {}).get("mmr", DEFAULT_MMR)
+            mmr2 = PLAYER_DB.get(p2, {}).get("mmr", DEFAULT_MMR)
 
-def save_db():
-    try:
-        with open(DB_FILE, "w") as f:
-            json.dump(PLAYER_DB, f, indent=4)
-    except Exception: pass
+            self.rooms[room_id] = {
+                "room_id": room_id, "secret": secret, "players": [p1, p2],
+                "game_over": False, "start_ts": time.time(),
+                "attempts": {p1: 0, p2: 0}, "finished": {p1: False, p2: False},
+                "solved": {p1: False, p2: False}, "history": {p1: [], p2: []},
+                "connected": {p1: True, p2: True}, "disconnect_task": {p1: None, p2: None},     
+                "spectators": [] 
+            }
 
-# Muat database saat file di-import
-load_db()
+            for pid, my_mmr, opp_mmr, opp in [(p1, mmr1, mmr2, p2), (p2, mmr2, mmr1, p1)]:
+                await self._send(pid, {
+                    "status": "match_start", "room_id": room_id, "opponent": opp,
+                    "my_mmr": my_mmr, "opp_mmr": opp_mmr, "duration": MATCH_DURATION_SECONDS,
+                    "history_self": [], "history_opp": [], "is_reconnect": False,
+                })
+                
+            print(f"🎮 MATCH ARENA DIMULAI: {p1} vs {p2} (Kata: {secret})")
+            self._timers[room_id] = asyncio.create_task(self._room_timer(room_id))
+        except Exception as e:
+            print(f"❌ Failed to start match: {e}")
 
-def get_or_create_player(username: str) -> dict:
-    if username not in PLAYER_DB:
-        PLAYER_DB[username] = {"password": "", "mmr": DEFAULT_MMR, "wins": 0, "losses": 0, "draws": 0, "total": 0}
-    if "mmr" not in PLAYER_DB[username]:
-        PLAYER_DB[username]["mmr"] = PLAYER_DB[username].pop("elo", DEFAULT_MMR)
-        PLAYER_DB[username]["total"] = PLAYER_DB[username].get("wins", 0) + PLAYER_DB[username].get("losses", 0) + PLAYER_DB[username].get("draws", 0)
-    return PLAYER_DB[username]
+    async def _room_timer(self, room_id: str):
+        try:
+            for remaining in range(MATCH_DURATION_SECONDS, -1, -1):
+                room = self.rooms.get(room_id)
+                if not room or room.get("game_over"): return
+                for p in room["players"] + room.get("spectators", []):
+                    if room["connected"].get(p, True) or p in room.get("spectators", []):
+                        if p in self.connections:
+                            await self._send(p, {"status": "timer_tick", "remaining": remaining})
+                if remaining == 0: break
+                await asyncio.sleep(1)
 
-def expected_score(mmr_a: float, mmr_b: float) -> float:
-    return 1.0 / (1.0 + 10 ** ((mmr_b - mmr_a) / 400))
+            room = self.rooms.get(room_id)
+            if room and not room.get("game_over"):
+                await self._finish(room, winner=None, reason="timeout")
+        except asyncio.CancelledError: pass
 
-def update_mmr(winner: str, loser: str, is_draw: bool = False) -> tuple[int, int]:
-    wp = get_or_create_player(winner)
-    lp = get_or_create_player(loser)
+    async def handle_disconnect_gracefully(self, username: str, room_id: str):
+        room = self.rooms.get(room_id)
+        if not room or room.get("game_over"): return
+        room["connected"][username] = False
+        opp = self._opponent(room, username)
+        
+        await self._send(opp, {"status": "opponent_disconnected", "player": username})
+        for s in room.get("spectators", []):
+             await self._send(s, {"status": "opponent_disconnected", "player": username})
+             
+        task = asyncio.create_task(self._grace_timer(room_id, username))
+        room["disconnect_task"][username] = task
 
-    exp_w = expected_score(wp["mmr"], lp["mmr"])
-    exp_l = expected_score(lp["mmr"], wp["mmr"])
+    async def _grace_timer(self, room_id: str, username: str):
+        try:
+            for _ in range(60): 
+                await asyncio.sleep(1)
+                room = self.rooms.get(room_id)
+                if not room or room.get("game_over") or room["connected"].get(username, False):
+                    return
+            room = self.rooms.get(room_id)
+            if room and not room.get("game_over") and not room["connected"].get(username, False):
+                opp = self._opponent(room, username)
+                await self._finish(room, winner=opp, reason="disconnect")
+        except asyncio.CancelledError: pass
 
-    score_w, score_l = (0.5, 0.5) if is_draw else (1.0, 0.0)
+    async def process_guess(self, username: str, room_id: str, guess: str):
+        from words import KBBI_WORDS 
+        room = self.rooms.get(room_id)
+        if not room or room.get("game_over") or username not in room["players"]: return
+        if room["finished"].get(username, False):
+            await self._send(username, {"status": "guess_error", "message": "Giliranmu habis!"})
+            return
 
-    delta_w = round(K_FACTOR * (score_w - exp_w))
-    delta_l = round(K_FACTOR * (score_l - exp_l))
+        guess = str(guess).strip().upper()
+        if len(guess) != 5:
+            await self._send(username, {"status": "guess_error", "message": "Kata harus 5 huruf!"})
+            return
+        if guess not in KBBI_WORDS:
+            await self._send(username, {"status": "guess_error", "message": "Kata tidak terdaftar!"})
+            return
 
-    wp["mmr"] = max(0, wp["mmr"] + delta_w)
-    lp["mmr"] = max(0, lp["mmr"] + delta_l)
+        secret = room["secret"]
+        result = evaluate_guess(guess, secret)
+        is_win = guess == secret
 
-    if is_draw:
-        wp["draws"] = wp.get("draws", 0) + 1
-        lp["draws"] = lp.get("draws", 0) + 1
-    else:
-        wp["wins"] = wp.get("wins", 0) + 1
-        lp["losses"] = lp.get("losses", 0) + 1
+        room["attempts"][username] += 1
+        room["history"][username].append({"guess": guess, "result": result})
+        if is_win: room["solved"][username] = True
+        opp = self._opponent(room, username)
 
-    wp["total"] = wp.get("total", 0) + 1
-    lp["total"] = lp.get("total", 0) + 1
-
-    save_db()
-    return delta_w, delta_l
-
-def get_leaderboard_data(top: int = 10) -> list:
-    players = sorted(PLAYER_DB.items(), key=lambda x: x[1].get("mmr", DEFAULT_MMR), reverse=True)
-    result  = []
-    for i, (uname, data) in enumerate(players[:top]):
-        result.append({
-            "rank": i + 1, "username": uname, "mmr": data.get("mmr", DEFAULT_MMR),
-            "wins": data.get("wins", 0), "losses": data.get("losses", 0), "draws": data.get("draws", 0), "total": data.get("total", 0),
+        await self._send(username, {
+            "status": "guess_result_self", "guess": guess, "result": result,
+            "is_win": is_win, "attempts": room["attempts"][username],
         })
-    return result
+        await self._send(opp, {
+            "status": "opponent_progress", "result": result, "attempts": room["attempts"][username]
+        })
+        
+        for spec in room.get("spectators", []):
+            await self._send(spec, {
+                "status": "spectator_progress", "player": username,
+                "guess": guess, "result": result
+            })
+
+        if is_win or room["attempts"][username] >= MAX_ATTEMPTS:
+            room["finished"][username] = True
+
+        p1, p2 = room["players"]
+        if is_win:
+            await self._finish(room, winner=username, reason="solved")
+        elif room["finished"][p1] and room["finished"][p2]:
+            await self._finish(room, winner=None, reason="all_exhausted")
+
+    async def send_chat(self, username: str, room_id: str, text: str):
+        room = self.rooms.get(room_id)
+        if room and (username in room["players"] or username in room.get("spectators", [])):
+            clean_text = str(text).strip()[:100] 
+            if clean_text:
+                await self._broadcast(room, {"status": "chat_receive", "sender": username, "text": clean_text})
+
+    def get_live_matches_data(self):
+        matches = []
+        for r_id, r in self.rooms.items():
+            if not r.get("game_over"):
+                p1, p2 = r["players"]
+                matches.append({
+                    "room_id": r_id, "p1": p1, "p2": p2,
+                    "score1": r["attempts"][p1], "score2": r["attempts"][p2]
+                })
+        return matches
+
+    async def spectate_room(self, username: str, room_id: str, ws=None):
+        room = self.rooms.get(room_id)
+        if room and not room.get("game_over"):
+            if username not in room["players"] and username not in room.get("spectators", []):
+                room["spectators"].append(username)
+                
+            p1, p2 = room["players"]
+            elapsed = time.time() - room["start_ts"]
+            remaining = max(0, int(MATCH_DURATION_SECONDS - elapsed))
+            
+            payload = {
+                "status": "spectate_start", "room_id": room_id,
+                "p1": p1, "p2": p2, "duration": remaining,
+                "history_p1": room["history"][p1], "history_p2": room["history"][p2]
+            }
+            if ws:
+                try: await ws.send(json.dumps(payload))
+                except: pass
+            else:
+                await self._send(username, payload)
+
+    async def _finish(self, room: dict, winner: str | None, reason: str):
+        if room.get("game_over"): return
+        room["game_over"] = True
+
+        task = self._timers.pop(room["room_id"], None)
+        if task: task.cancel()
+
+        p1, p2  = room["players"]
+        secret  = room["secret"]
+        is_draw = winner is None
+
+        try:
+            if is_draw:
+                d1, d2 = update_mmr(p1, p2, is_draw=True)
+            else:
+                loser = self._opponent(room, winner)
+                d_w, d_l = update_mmr(winner, loser, is_draw=False)
+                d1 = d_w if winner == p1 else d_l
+                d2 = d_w if winner == p2 else d_l
+        except Exception:
+            d1, d2 = 0, 0
+
+        for pid, delta in [(p1, d1), (p2, d2)]:
+            if is_draw:
+                outcome = "DRAW"
+                msg = "Waktu habis, seri!" if reason == "timeout" else "Kedua pemain kehabisan kesempatan."
+            else:
+                outcome = "WIN" if pid == winner else "LOSE"
+                if reason == "disconnect":
+                    msg = "Lawan keluar dari arena." if outcome == "WIN" else "Kamu terputus terlalu lama."
+                elif reason == "solved":
+                    msg = "Selamat! Kamu berhasil menebak kata." if outcome == "WIN" else "Lawan berhasil menebak kata lebih cepat!"
+                else:
+                    msg = "Lawan kehabisan percobaan." if outcome == "WIN" else "Kamu kehabisan percobaan."
+
+            await self._send(pid, {
+                "status": "match_over", "outcome": outcome, "mmr_delta": delta,
+                "new_mmr": PLAYER_DB.get(pid, {}).get("mmr", DEFAULT_MMR),
+                "secret": secret, "reason_msg": msg,
+                "my_attempts": room["attempts"].get(pid, 0), "opp_attempts": room["attempts"].get(self._opponent(room, pid), 0),
+                "history_self": room["history"][pid],
+                "history_opp": room["history"][self._opponent(room, pid)],
+                "p1": pid,
+                "p2": self._opponent(room, pid)
+            })
+
+        for spec in room.get("spectators", []):
+            await self._send(spec, {
+                "status": "match_over_spectator", 
+                "secret": secret, 
+                "winner": winner, 
+                "p1": p1, "p2": p2,
+                "attempts_p1": room["attempts"].get(p1, 0), 
+                "attempts_p2": room["attempts"].get(p2, 0),
+                "history_p1": room["history"][p1],
+                "history_p2": room["history"][p2],
+                "reason_msg": "Pertandingan Selesai."
+            })
+
+        asyncio.create_task(self._cleanup_room(room["room_id"]))
+
+    async def _cleanup_room(self, room_id: str):
+        await asyncio.sleep(15)
+        self.rooms.pop(room_id, None)

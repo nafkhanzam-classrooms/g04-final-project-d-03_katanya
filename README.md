@@ -8,8 +8,7 @@
 --- 
 
 # Video Demo
-<https://index.html>
-
+<https://youtu.be/-6b2v_fuFUU>
 ---
 
 # KATANYA - Dokumentasi Front-End

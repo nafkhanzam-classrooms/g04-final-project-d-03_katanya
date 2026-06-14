@@ -1,203 +1,718 @@
-<!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>KATANYA - Tebak Kata Multiplayer</title>
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
+const WS_BASE  = "ws://127.0.0.1:8000";
+const ROWS = 6, COLS = 5;
+const REVEAL_MS    = COLS * 150 + 380;
+const MATCH_DUR    = 300; 
+const KB_ROWS = [
+  ["Q","W","E","R","T","Y","U","I","O","P"],
+  ["A","S","D","F","G","H","J","K","L"],
+  ["ENTER","Z","X","C","V","B","N","M","⌫"],
+];
 
-<div id="ping-indicator">Ping: -- ms</div>
-<div id="input-lock"></div>
-<div id="toast-root"></div>
+let sessionUser  = "";
+let sessionMmr   = 0;
+let currentPanel = "match";
+let ws           = null;
+let roomId       = null;
+let inputLocked  = false;
+let arenaOppRow  = 0;
 
-<!-- AUTH SCREEN -->
-<div id="auth-screen">
-  <div class="auth-box">
-    <h1>KATANYA</h1>
-    <p>Game Tebak Kata PvP Arena</p>
-    <input type="text" id="auth-user" placeholder="Username" autocomplete="off" maxlength="15">
-    <input type="password" id="auth-pass" placeholder="Password" maxlength="20">
-    <button id="btn-login" class="btn full" onclick="doAuth('login')">Masuk (Login)</button>
-    <div class="auth-divider">── atau ──</div>
-    <button id="btn-reg" class="btn full ghost" onclick="doAuth('register')">Daftar Akun Baru</button>
-  </div>
-</div>
+let myDcInterval = null;
+let oppDcInterval = null;
 
-<!-- SIDEBAR -->
-<div class="sidebar">
-  <div class="logo">KATANYA</div>
-  <div class="logo-sub">PvP ARENA</div>
-  <div class="profile-badge">
-    👤 <span id="pf-name" style="font-weight:700;color:var(--green)">–</span><br>
-    🏆 MMR: <span id="pf-mmr" style="font-weight:700;color:var(--gold)">–</span>
-    &nbsp;|&nbsp; W: <span id="pf-w" style="color:var(--green)">0</span>
-    L: <span id="pf-l" style="color:var(--red)">0</span>
-    D: <span id="pf-d" style="color:var(--muted)">0</span>
-  </div>
-  <button class="menu-btn active" onclick="nav('match')">🎮 Play Match</button>
-  <button class="menu-btn" onclick="nav('daily')">📅 Daily Quiz</button>
-  <button class="menu-btn" onclick="nav('practice')">🏋️ Practice</button>
-  <button class="menu-btn" onclick="nav('spectate')">👁️ Spectate</button>
-  <button class="menu-btn" onclick="nav('rank')">🏆 Leaderboard</button>
-  <button class="menu-btn danger" onclick="doLogout()">🚪 Logout</button>
-</div>
+let isSpectating = false;
+let specP1 = "";
+let specP2 = "";
 
-<!-- MAIN -->
-<div class="main">
+let replayData = null;
 
-  <!-- MATCH -->
-  <div id="panel-match" class="panel active" style="margin-top:60px">
-    <div class="card">
-      <h2>⚔️ Live Matchmaking</h2>
-      <p style="color:var(--muted);margin-bottom:16px">Bertanding 1v1 real-time. Tebak kata yang sama lebih cepat dari lawan!</p>
-      <div style="font-size:1.1rem;margin-bottom:4px">Rating kamu: <strong id="dash-mmr" style="color:var(--gold);font-size:1.4rem">–</strong></div>
-      <button class="btn" id="btn-find" onclick="findMatch()">Cari Lawan</button>
-    </div>
-    <div class="card" style="border-left:3px solid var(--gold)">
-      <h2 style="color:var(--gold)">📅 Daily Quiz Hari Ini</h2>
-      <p id="daily-status-home" style="color:var(--muted);margin-bottom:14px">Satu kata khusus untuk semua pemain.</p>
-      <button class="btn gold sm" onclick="nav('daily')">Main Sekarang</button>
-    </div>
-  </div>
+const B = {
+  arena:    { r:0, c:0, g:"", over:false, secret:"" },
+  daily:    { r:0, c:0, g:"", over:false },
+  practice: { r:0, c:0, g:"", over:false, secret:"" },
+};
+const DAILY_KEY = "kat_daily_" + new Date().toISOString().slice(0,10);
 
-  <!-- ARENA & SPECTATE UI -->
-  <div id="panel-arena" class="panel" style="max-width:940px;margin-top:20px">
-    <div style="display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:16px;padding:0 4px">
-      <!-- P1 (Kamu) -->
-      <div class="arena-header-col" style="text-align:left;">
-        <div id="arena-my-tag" style="font-weight:700;color:var(--green);font-size:0.95rem">Kamu</div>
-        <div id="arena-my-status" style="color:var(--red); font-size:0.8rem; display:none; margin-top:4px; font-weight: bold;">Terputus (60s)</div>
-      </div>
-      <!-- Timer -->
-      <div class="timer-wrap">
-        <div id="timer-disp" class="timer-display">⏱ 05:00</div>
-        <div class="timer-bar"><div id="timer-fill" class="timer-fill" style="width:100%"></div></div>
-      </div>
-      <!-- P2 (Lawan) -->
-      <div class="arena-header-col" style="text-align:right;">
-        <div id="arena-opp-tag" style="font-weight:700;color:var(--gold);font-size:0.95rem">Lawan</div>
-        <div id="arena-opp-status" style="color:var(--red); font-size:0.8rem; display:none; margin-top:4px; font-weight: bold;">Terputus (60s)</div>
-      </div>
-    </div>
+function toast(msg, type = "") {
+  const root = document.getElementById("toast-root");
+  const el   = document.createElement("div");
+  el.className   = "toast " + type;
+  el.textContent = msg;
+  root.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
 
-    <div class="card" style="padding:20px; margin-bottom:10px;">
-      <div class="arena-wrap">
-        <div class="arena-col">
-          <div style="font-weight:700;color:var(--green);margin-bottom:6px" id="arena-my-label">Papan Kamu</div>
-          <div class="board" id="arena-board"></div>
-          <div class="keyboard" id="arena-kb"></div>
-        </div>
-        <div class="arena-col" style="opacity:0.72" id="opp-board-wrapper">
-          <div style="font-weight:700;color:var(--gold);margin-bottom:6px" id="arena-opp-label">Lawan</div>
-          <div class="board" id="arena-opp-board"></div>
-          <p id="arena-opp-info" style="font-size:0.75rem;color:var(--muted);margin-top:10px;text-align:center">Progres lawan (live)</p>
-        </div>
-      </div>
-    </div>
+// ── Inisialisasi Soket Langsung Saat Dibuka ──
+function connectSocket() {
+    if (ws) return;
+    ws = new WebSocket(WS_BASE);
+    ws.onopen = () => { console.log("Terhubung ke Server Soket"); };
+    ws.onmessage = e => handleWS(JSON.parse(e.data));
+    ws.onclose = () => { 
+        ws = null;
+        const ind = document.getElementById("ping-indicator");
+        if(ind) ind.textContent = "Terputus...";
+        setTimeout(connectSocket, 3000); 
+    };
+}
+connectSocket();
 
-    <!-- Live Chat -->
-    <div class="chat-wrap" id="arena-chat">
-        <div id="chat-box" class="chat-msgs"></div>
-        <div class="chat-input-row">
-            <input type="text" id="chat-input" placeholder="Ketik pesan..." maxlength="100" />
-            <button class="btn sm" onclick="sendChat()" style="margin:0;">Kirim</button>
-        </div>
-    </div>
-  </div>
+setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({action: "ping", ts: Date.now()}));
+    }
+}, 2000);
 
-  <!-- REPLAY MATCH UI (NEW) -->
-  <div id="panel-replay" class="panel" style="max-width:940px;margin-top:40px">
-      <div class="card" style="padding:20px;">
-        <h2 style="text-align:center; color:var(--gold); margin-bottom: 5px;">🎥 REPLAY PERTANDINGAN</h2>
-        <p id="replay-secret" style="text-align:center; color:var(--muted); margin-bottom: 20px;">Kata Rahasia: ?????</p>
+// ── Auth Menggunakan WS ──
+function doAuth(type) {
+  const user = document.getElementById("auth-user")?.value.trim();
+  const pass = document.getElementById("auth-pass")?.value;
+  if (!user || !pass) { toast("Username dan password tidak boleh kosong!", "error"); return; }
+  
+  if (!ws || ws.readyState !== WebSocket.OPEN) { 
+      toast("Server belum siap...", "error"); return; 
+  }
+
+  const btnLogin = document.getElementById("btn-login");
+  const btnReg = document.getElementById("btn-reg");
+  if(btnLogin) { btnLogin.disabled = true; btnLogin.textContent = "Memproses..."; }
+  if(btnReg) { btnReg.disabled = true; btnReg.textContent = "Memproses..."; }
+  
+  ws.send(JSON.stringify({ action: type, username: user, password: pass }));
+}
+
+function doLogout() {
+  sessionUser = ""; sessionMmr = 0;
+  if (ws) { try { ws.close(); } catch(e){} ws = null; }
+  
+  const btnLogin = document.getElementById("btn-login");
+  const btnReg = document.getElementById("btn-reg");
+  if(btnLogin) { btnLogin.disabled = false; btnLogin.textContent = "Masuk (Login)"; }
+  if(btnReg) { btnReg.disabled = false; btnReg.textContent = "Daftar Akun Baru"; }
+  
+  document.getElementById("auth-screen").style.display = "flex";
+  document.getElementById("auth-user").value = "";
+  document.getElementById("auth-pass").value = "";
+  if (myDcInterval) { clearInterval(myDcInterval); myDcInterval = null; }
+  if (oppDcInterval) { clearInterval(oppDcInterval); oppDcInterval = null; }
+  
+  connectSocket(); 
+}
+
+function updateProfile(data) {
+  const n = document.getElementById("pf-name"); if(n) n.textContent = data.username || sessionUser;
+  const m = document.getElementById("pf-mmr"); if(m) m.textContent = data.mmr || sessionMmr;
+  const w = document.getElementById("pf-w"); if(w) w.textContent = data.wins || 0;
+  const l = document.getElementById("pf-l"); if(l) l.textContent = data.losses || 0;
+  const d = document.getElementById("pf-d"); if(d) d.textContent = data.draws || 0;
+  const dm = document.getElementById("dash-mmr"); if(dm) dm.textContent = (data.mmr || sessionMmr) + " MMR";
+}
+
+function nav(panel) {
+  document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".menu-btn").forEach(b => b.classList.remove("active"));
+  const el = document.getElementById("panel-" + panel);
+  if(el) el.classList.add("active");
+  document.querySelectorAll(".menu-btn").forEach(b => {
+    if ((b.getAttribute("onclick")||"").includes("'" + panel + "'")) b.classList.add("active");
+  });
+  currentPanel = panel;
+  if (panel === "rank") fetchLeaderboard();
+  if (panel === "spectate") fetchLiveMatches();
+}
+
+function buildBoard(id, prefix, small = false) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = "";
+  for (let r = 0; r < ROWS; r++) {
+    const row = document.createElement("div"); row.className = "board-row"; row.id = prefix + "-row-" + r;
+    for (let c = 0; c < COLS; c++) {
+      const t = document.createElement("div"); t.className = "tile" + (small ? " sm" : ""); t.id = prefix + "-t-" + r + "-" + c;
+      row.appendChild(t);
+    }
+    el.appendChild(row);
+  }
+}
+
+function buildKB(id, prefix) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = "";
+  KB_ROWS.forEach(row => {
+    const div = document.createElement("div"); div.className = "kb-row";
+    row.forEach(k => {
+      const btn = document.createElement("button"); btn.className = "key" + (k.length > 1 ? " wide" : "");
+      btn.textContent = k; btn.id = prefix + "-k-" + k;
+      btn.addEventListener("click", () => handleKey(prefix === "arena-opp" ? "arena" : prefix, k));
+      div.appendChild(btn);
+    });
+    el.appendChild(div);
+  });
+}
+
+function revealRow(prefix, row, letters, result, animate) {
+  for (let c = 0; c < COLS; c++) {
+    const t = document.getElementById(prefix + "-t-" + row + "-" + c);
+    if (!t) continue;
+    t.textContent = letters[c] || "";
+    const paintFn = () => {
+      const map = { correct: "var(--green)", present: "var(--yellow)", absent: "var(--absent)" };
+      t.style.background = map[result[c]] || ""; t.style.borderColor = "transparent"; t.style.color = "#fff";
+      if (prefix !== "opp" && prefix !== "rep1" && prefix !== "rep2") colorKey(prefix, letters[c], result[c]);
+    };
+    if (animate) { setTimeout(() => { t.classList.add("flip"); setTimeout(paintFn, 260); }, c * 150); } 
+    else { paintFn(); }
+  }
+}
+
+function colorKey(prefix, ch, status) {
+  const el = document.getElementById(prefix + "-k-" + ch);
+  if (!el) return;
+  const cur = el.style.background;
+  if (cur === "var(--green)") return;
+  if (cur === "var(--yellow)" && status === "absent") return;
+  el.style.background = status === "correct" ? "var(--green)" : status === "present" ? "var(--yellow)" : "var(--absent)";
+}
+
+function shakeRow(prefix, row) {
+  const el = document.getElementById(prefix + "-row-" + row);
+  if (!el) return;
+  el.classList.add("shake"); setTimeout(() => el.classList.remove("shake"), 450);
+}
+
+document.addEventListener("keydown", e => {
+  if (!sessionUser) return;
+  if (document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA")) return;
+  const k = e.key === "Backspace" ? "⌫" : e.key.toUpperCase();
+  const modeMap = { match: null, arena: "arena", daily: "daily", practice: "prac", rank: null };
+  const mode = modeMap[currentPanel];
+  if (mode) handleKey(mode, k);
+});
+
+document.getElementById("chat-input")?.addEventListener("keypress", function(e) {
+    if(e.key === "Enter") sendChat();
+});
+
+function handleKey(mode, key) {
+  if (mode === "arena" && (inputLocked || isSpectating)) return;
+  const b = (mode === "prac") ? B.practice : B[mode];
+  if (!b || b.over) return;
+  if (b.r >= ROWS) return;
+
+  if (key === "ENTER") {
+    if (b.g.length < COLS) { shakeRow(mode, b.r); toast("Kata belum lengkap!"); return; }
+    submitGuess(mode, b.g); return;
+  }
+  if (key === "⌫" || key === "BACKSPACE") {
+    if (b.c > 0) { b.c--; b.g = b.g.slice(0, -1); const t = document.getElementById(mode + "-t-" + b.r + "-" + b.c); if (t) { t.textContent = ""; t.classList.remove("pop"); } }
+    return;
+  }
+  if (/^[A-Z]$/.test(key) && b.c < COLS) {
+    const t = document.getElementById(mode + "-t-" + b.r + "-" + b.c);
+    if (t) { t.textContent = key; t.classList.add("pop"); }
+    b.g += key; b.c++;
+  }
+}
+
+// ── Submit Murni Lewat Soket ──
+function submitGuess(mode, guess) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { toast("Server terputus!", "error"); return; }
+  
+  if (mode === "arena") {
+    ws.send(JSON.stringify({ action: "submit_arena_guess", room_id: roomId, guess })); 
+  } else if (mode === "daily") {
+    ws.send(JSON.stringify({ action: "check_daily_guess", guess: guess })); 
+  } else {
+    ws.send(JSON.stringify({ action: "check_guess", guess: guess, secret_word: B.practice.secret })); 
+  }
+}
+
+function newPracticeWord() {
+  document.getElementById("btn-next").style.display = "none";
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: "get_practice_secret" }));
+}
+
+function sendChat() {
+    const input = document.getElementById("chat-input");
+    const text = input.value.trim();
+    if(text && ws && roomId) {
+        ws.send(JSON.stringify({action: "send_chat", room_id: roomId, text: text}));
+        input.value = "";
+    }
+}
+
+function findMatch() {
+  if (!sessionUser) { toast("Login dulu!", "error"); return; }
+  const btn = document.getElementById("btn-find"); btn.disabled = true; btn.textContent = "Mencari lawan... 🔍";
+  ws.send(JSON.stringify({ action: "find_match" }));
+}
+
+function fetchLiveMatches() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: "get_live_matches" }));
+    }
+}
+
+function fetchLeaderboard() {
+  if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ action: "get_leaderboard" })); return; }
+}
+
+function watchMatch(rId) {
+    if (ws) ws.send(JSON.stringify({ action: "spectate_room", room_id: rId }));
+}
+
+function resetFindBtn() { const btn = document.getElementById("btn-find"); if (btn) { btn.disabled = false; btn.textContent = "Cari Lawan"; } }
+
+// ── Handler Pusat Pesan Soket ──
+function handleWS(data) {
+  const st = data.status;
+
+  if (st === "pong") {
+      const ms = Date.now() - data.ts;
+      const indicator = document.getElementById("ping-indicator");
+      if(indicator) indicator.textContent = `Ping: ${ms} ms`;
+      return;
+  }
+
+  if (st === "auth_success") {
+      sessionUser = data.username;
+      sessionMmr  = data.mmr;
+      updateProfile(data);
+      const authScreen = document.getElementById("auth-screen");
+      if(authScreen) authScreen.style.display = "none";
+      toast("👋 Selamat datang, " + data.username + "!", "success");
+
+      buildBoard("prac-board",  "prac"); buildBoard("daily-board", "daily");
+      buildKB("prac-kb",  "prac"); buildKB("daily-kb", "daily");
+      restoreDaily(); newPracticeWord();
+      
+      if(!window.dailyIntervalTimer) { window.dailyIntervalTimer = setInterval(updateDailyCountdown, 1000); }
+      updateDailyCountdown();
+      return;
+  }
+
+  if (st === "auth_error") {
+      toast(data.message, "error");
+      const btnLogin = document.getElementById("btn-login");
+      const btnReg = document.getElementById("btn-reg");
+      if(btnLogin) { btnLogin.disabled = false; btnLogin.textContent = "Masuk (Login)"; }
+      if(btnReg) { btnReg.disabled = false; btnReg.textContent = "Daftar Akun Baru"; }
+      return;
+  }
+
+  if (st === "practice_secret") {
+      B.practice = { r:0, c:0, g:"", over:false, secret: data.secret_word };
+      buildBoard("prac-board", "prac"); buildKB("prac-kb", "prac");
+      return;
+  }
+
+  if (st === "guess_error_single") {
+      const prefix = data.mode === "daily" ? "daily" : "prac";
+      const b = data.mode === "daily" ? B.daily : B.practice;
+      shakeRow(prefix, b.r); toast(data.message, "error");
+      return;
+  }
+
+  if (st === "guess_res_single") {
+      const isDaily = data.mode === "daily";
+      const b = isDaily ? B.daily : B.practice;
+      const prefix = isDaily ? "daily" : "prac";
+
+      const letters = data.guess.split("");
+      revealRow(prefix, b.r, letters, data.result, true);
+      b.r++; b.c = 0; b.g = "";
+
+      if (isDaily) saveDailyRow(data.guess, data.result);
+      if (data.is_win || b.r >= ROWS) {
+          b.over = true;
+          setTimeout(() => {
+              if(data.is_win) toast(isDaily ? "🎉 Daily Selesai!" : "🎉 Benar!", "success");
+              else toast("Kesempatan habis!", "error");
+              
+              if (isDaily) { saveDailyFinished(data.is_win); document.getElementById("btn-share").style.display = "inline-block"; }
+              else { document.getElementById("btn-next").style.display = "inline-block"; }
+          }, REVEAL_MS);
+      }
+      return;
+  }
+
+  if (st === "searching") { toast("Sedang mencari lawan..."); return; }
+  if (st === "timer_tick") { setTimerDisplay(data.remaining); return; }
+
+  if (st === "chat_receive") {
+      const box = document.getElementById("chat-box");
+      const div = document.createElement("div"); div.className = "chat-msg";
+      div.innerHTML = `<span class="sender">${data.sender}:</span> ${data.text}`;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+      return;
+  }
+
+  if (st === "live_matches_data") {
+      const tbody = document.getElementById("spectate-body");
+      if(!data.matches || data.matches.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);text-align:center;">Tidak ada pertandingan live.</td></tr>';
+      } else {
+          tbody.innerHTML = data.matches.map(m => `
+            <tr>
+                <td>${m.p1} <span style="color:var(--muted)">(${m.score1}/6)</span></td>
+                <td style="color:var(--gold);font-weight:bold;">VS</td>
+                <td>${m.p2} <span style="color:var(--muted)">(${m.score2}/6)</span></td>
+                <td><button class="btn sm" onclick="watchMatch('${m.room_id}')">Tonton</button></td>
+            </tr>
+          `).join("");
+      }
+      return;
+  }
+
+  if (st === "spectate_start") {
+    try {
+        roomId = data.room_id; isSpectating = true; inputLocked = true;
+        specP1 = data.p1; specP2 = data.p2;
+
+        const il = document.getElementById("input-lock"); if(il) il.style.display = "none";
+        const akb = document.getElementById("arena-kb"); if(akb) akb.style.display = "none";
+        const cb = document.getElementById("chat-box"); if(cb) cb.innerHTML = "";
+
+        buildBoard("arena-board", "arena"); buildBoard("arena-opp-board", "opp");
         
-        <div class="arena-wrap">
-          <div class="arena-col">
-            <div style="font-weight:700;color:var(--green);margin-bottom:6px" id="replay-p1-label">Pemain 1</div>
-            <div class="board" id="replay-board-1"></div>
-          </div>
-          <div class="arena-col">
-            <div style="font-weight:700;color:var(--gold);margin-bottom:6px" id="replay-p2-label">Pemain 2</div>
-            <div class="board" id="replay-board-2"></div>
-          </div>
-        </div>
+        const mt = document.getElementById("arena-my-tag"); if(mt) mt.textContent = `[P1] ${specP1}`;
+        const ot = document.getElementById("arena-opp-tag"); if(ot) ot.textContent = `[P2] ${specP2}`;
+        const ml = document.getElementById("arena-my-label"); if(ml) ml.textContent = `Papan ${specP1}`;
+        const ol = document.getElementById("arena-opp-label"); if(ol) ol.textContent = `Papan ${specP2}`;
+        const oi = document.getElementById("arena-opp-info"); if(oi) oi.textContent = "Papan pemain 2";
 
-        <div style="text-align:center; margin-top:30px;">
-            <button class="btn ghost" onclick="nav('match'); fetchLeaderboard();">Tutup & Kembali ke Menu</button>
-        </div>
-      </div>
-  </div>
+        if (myDcInterval) { clearInterval(myDcInterval); myDcInterval = null; }
+        if (oppDcInterval) { clearInterval(oppDcInterval); oppDcInterval = null; }
+        const ms = document.getElementById("arena-my-status"); if(ms) ms.style.display = "none";
+        const os = document.getElementById("arena-opp-status"); if(os) os.style.display = "none";
 
-  <!-- SPECTATE LIST -->
-  <div id="panel-spectate" class="panel" style="margin-top:40px">
-    <div class="card">
-      <h2>👁️ Live Spectate</h2>
-      <p style="color:var(--muted);margin-bottom:16px">Tonton pertandingan yang sedang berlangsung.</p>
-      <button class="btn sm ghost" onclick="fetchLiveMatches()">🔄 Refresh List</button>
-      <table class="tbl" style="margin-top:16px;">
-        <thead><tr><th>Pemain 1</th><th>VS</th><th>Pemain 2</th><th>Aksi</th></tr></thead>
-        <tbody id="spectate-body"><tr><td colspan="4" style="color:var(--muted);text-align:center;padding:20px">Klik refresh untuk memuat...</td></tr></tbody>
-      </table>
-    </div>
-  </div>
+        B.arena.r = 0; arenaOppRow = 0;
+        data.history_p1.forEach((item, i) => { revealRow("arena", i, item.guess.split(""), item.result, false); B.arena.r++; });
+        data.history_p2.forEach((item, i) => { revealRow("opp", i, item.guess.split(""), item.result, false); arenaOppRow++; });
 
-  <!-- DAILY -->
-  <div id="panel-daily" class="panel" style="margin-top:40px">
-    <div class="card">
-      <h2>📅 Daily Quiz</h2>
-      <p id="daily-countdown" style="color:var(--gold);font-size:0.88rem;margin:8px 0 16px">Kata baru dalam: --:--:--</p>
-      <div class="board" id="daily-board"></div>
-      <div class="keyboard" id="daily-kb"></div>
-      <button id="btn-share" class="btn gold" style="display:none;margin-top:20px" onclick="shareDaily()">🔗 Bagikan Hasil</button>
-    </div>
-  </div>
+        setTimerDisplay(data.duration || MATCH_DUR);
+        toast("Mulai menonton pertandingan", "success");
+    } catch(err) {} finally {
+        nav("arena");
+    }
+    return;
+  }
 
-  <!-- PRACTICE -->
-  <div id="panel-practice" class="panel" style="margin-top:40px">
-    <div class="card">
-      <h2>🏋️ Mode Latihan</h2>
-      <p style="color:var(--muted);margin-bottom:16px">Latihan tanpa batas. Kata baru setiap ronde.</p>
-      <div class="board" id="prac-board"></div>
-      <div class="keyboard" id="prac-kb"></div>
-      <button id="btn-next" class="btn" style="display:none;margin-top:16px" onclick="newPracticeWord()">Kata Berikutnya →</button>
-    </div>
-  </div>
+  if (st === "match_start") {
+    try {
+        roomId = data.room_id; inputLocked = false; isSpectating = false; arenaOppRow = 0;
+        B.arena = { r:0, c:0, g:"", over:false, secret:"" };
 
-  <!-- RANK -->
-  <div id="panel-rank" class="panel" style="margin-top:40px">
-    <div class="card">
-      <h2>🏆 Leaderboard</h2>
-      <table class="tbl">
-        <thead><tr><th>#</th><th>Username</th><th>MMR</th><th>W</th><th>L</th><th>D</th><th>TOTAL</th></tr></thead>
-        <tbody id="lb-body"><tr><td colspan="7" style="color:var(--muted);text-align:center;padding:20px">Memuat...</td></tr></tbody>
-      </table>
-    </div>
-  </div>
+        const il = document.getElementById("input-lock"); if(il) il.style.display = "none";
+        const akb = document.getElementById("arena-kb"); if(akb) akb.style.display = "flex";
+        const cb = document.getElementById("chat-box"); if(cb) cb.innerHTML = ""; 
 
-</div>
+        if (myDcInterval) { clearInterval(myDcInterval); myDcInterval = null; }
+        if (oppDcInterval) { clearInterval(oppDcInterval); oppDcInterval = null; }
+        const ms = document.getElementById("arena-my-status"); if(ms) ms.style.display = "none";
+        const os = document.getElementById("arena-opp-status"); if(os) os.style.display = "none";
 
-<!-- MATCH MODAL -->
-<div id="match-modal">
-  <div class="modal-box" id="modal-card">
-    <div class="modal-icon"  id="m-icon">🏆</div>
-    <div class="modal-title" id="m-title">MENANG!</div>
-    <div class="modal-sub"   id="m-sub">Pertandingan selesai.</div>
-    <div class="modal-secret">Kata rahasia:</div>
-    <div class="modal-word"  id="m-word">?????</div>
-    <div class="mmr-box" id="m-mmr-box">
-      <div class="mmr-label">Perubahan MMR</div>
-      <div class="mmr-delta" id="m-delta">+0</div>
-      <div class="mmr-new">Rating sekarang: <strong id="m-newmmr" style="color:var(--gold)">–</strong></div>
-    </div>
-    <button class="btn full" id="m-btn-1" onclick="modalPlayAgain()">Cari Lawan Lagi</button>
-    <!-- TOMBOL REPLAY (NEW) -->
-    <button class="btn full gold" id="m-btn-replay" onclick="showReplay()" style="display: none;">🎥 Lihat Replay</button>
-    <button class="btn full ghost" onclick="modalToDashboard()">Kembali ke Dashboard</button>
-  </div>
-</div>
+        buildBoard("arena-board", "arena"); buildBoard("arena-opp-board", "opp"); buildKB("arena-kb", "arena");
 
-<script src="script.js"></script>
-</body>
-</html>
+        const uname = sessionUser; const opp = data.opponent;
+        const mt = document.getElementById("arena-my-tag"); if(mt) mt.textContent  = `${uname} (${data.my_mmr} MMR)`;
+        const ot = document.getElementById("arena-opp-tag"); if(ot) ot.textContent = `${opp} (${data.opp_mmr} MMR)`;
+        const ml = document.getElementById("arena-my-label"); if(ml) ml.textContent  = `Papan ${uname}`;
+        const ol = document.getElementById("arena-opp-label"); if(ol) ol.textContent = `Papan ${opp}`;
+        const oi = document.getElementById("arena-opp-info"); if(oi) oi.textContent = "Progres lawan (live)";
+
+        if (data.is_reconnect) {
+          (data.history_self || []).forEach((item, i) => { revealRow("arena", i, item.guess.split(""), item.result, false); B.arena.r++; });
+          (data.history_opp || []).forEach((item, i) => { revealRow("opp", i, Array(5).fill(" "), item.result, false); arenaOppRow++; });
+          toast("🔄 Berhasil kembali ke game!", "success");
+        } else {
+          toast(`🎮 Lawan ditemukan: ${opp}!`, "success");
+        }
+
+        setTimerDisplay(data.duration || MATCH_DUR); 
+    } catch(err) {} finally {
+        resetFindBtn(); nav("arena"); 
+    }
+    return;
+  }
+
+  if (st === "spectator_progress") {
+      const letters = data.guess.split("");
+      if (data.player === specP1) {
+          revealRow("arena", B.arena.r, letters, data.result, true); B.arena.r++;
+      } else if (data.player === specP2) {
+          revealRow("opp", arenaOppRow, letters, data.result, true); arenaOppRow++;
+      }
+      return;
+  }
+
+  if (st === "opponent_disconnected") {
+    let pName = data.player || "Lawan";
+    let isP1 = isSpectating && (pName === specP1);
+    let statusElId = isP1 ? "arena-my-status" : "arena-opp-status";
+
+    toast(`⚠️ ${pName} terputus! Menunggu 60 detik...`, "error");
+    const statusEl = document.getElementById(statusElId);
+    let sec = 60; 
+    if(statusEl) { statusEl.style.display = "block"; statusEl.textContent = `Terputus (${sec}s)`; }
+
+    if (isP1) {
+        if (myDcInterval) clearInterval(myDcInterval);
+        myDcInterval = setInterval(() => {
+            sec--;
+            if(statusEl) {
+                if (sec <= 0) { clearInterval(myDcInterval); statusEl.textContent = `Keluar`; } 
+                else { statusEl.textContent = `Terputus (${sec}s)`; }
+            }
+        }, 1000);
+    } else {
+        if (oppDcInterval) clearInterval(oppDcInterval);
+        oppDcInterval = setInterval(() => {
+            sec--;
+            if(statusEl) {
+                if (sec <= 0) { clearInterval(oppDcInterval); statusEl.textContent = `Keluar`; } 
+                else { statusEl.textContent = `Terputus (${sec}s)`; }
+            }
+        }, 1000);
+    }
+    return;
+  }
+
+  if (st === "opponent_reconnected") {
+    let pName = data.player || "Lawan";
+    toast(`✅ ${pName} terhubung kembali!`, "success");
+    
+    let isP1 = isSpectating && (pName === specP1);
+    let statusElId = isP1 ? "arena-my-status" : "arena-opp-status";
+
+    if (isP1) { if (myDcInterval) { clearInterval(myDcInterval); myDcInterval = null; } } 
+    else { if (oppDcInterval) { clearInterval(oppDcInterval); oppDcInterval = null; } }
+    
+    const statusEl = document.getElementById(statusElId);
+    if(statusEl) statusEl.style.display = "none";
+    return;
+  }
+
+  if (st === "guess_result_self") {
+    const row = B.arena.r; const letters = B.arena.g.split(""); 
+    revealRow("arena", row, letters, data.result, true); B.arena.r++; B.arena.c = 0; B.arena.g = ""; return;
+  }
+
+  if (st === "guess_error") { shakeRow("arena", B.arena.r); toast(data.message, "error"); return; }
+
+  if (st === "opponent_progress") { revealRow("opp", arenaOppRow, Array(5).fill(" "), data.result, true); arenaOppRow++; return; }
+
+  if (st === "match_over" || st === "match_over_spectator") {
+    inputLocked = true; B.arena.over = true;
+    
+    if (myDcInterval) { clearInterval(myDcInterval); myDcInterval = null; }
+    if (oppDcInterval) { clearInterval(oppDcInterval); oppDcInterval = null; }
+    
+    const myStat = document.getElementById("arena-my-status"); if(myStat) myStat.style.display = "none";
+    const oppStat = document.getElementById("arena-opp-status"); if(oppStat) oppStat.style.display = "none";
+    
+    const lockEl = document.getElementById("input-lock");
+    if (lockEl) lockEl.style.display = "block";
+
+    let outcome = "DRAW";
+    let delta = 0;
+    let newMmr = sessionMmr;
+    let secret = data.secret || "?????";
+    let reason = data.reason_msg || "Pertandingan Selesai.";
+    let myAtt = 0;
+    let oppAtt = 0;
+    let winnerName = null;
+    let p1Name = null;
+    let p2Name = null;
+
+    if (st === "match_over_spectator") {
+        outcome = "SPECTATOR";
+        myAtt = data.attempts_p1 || 0;
+        oppAtt = data.attempts_p2 || 0;
+        winnerName = data.winner;
+        p1Name = data.p1;
+        p2Name = data.p2;
+        replayData = { p1: data.p1, p2: data.p2, secret: secret, hist1: data.history_p1 || [], hist2: data.history_p2 || [] };
+    } else {
+        outcome = data.outcome || "DRAW";
+        delta = (typeof data.mmr_delta === 'number') ? data.mmr_delta : 0;
+        newMmr = data.new_mmr || sessionMmr;
+        myAtt = data.my_attempts || 0;
+        oppAtt = data.opp_attempts || 0;
+        
+        sessionMmr = newMmr;
+        const pfMmr = document.getElementById("pf-mmr"); if(pfMmr) pfMmr.textContent = newMmr;
+        const dashMmr = document.getElementById("dash-mmr"); if(dashMmr) dashMmr.textContent = newMmr + " MMR";
+
+        replayData = { p1: sessionUser, p2: data.p2, secret: secret, hist1: data.history_self || [], hist2: data.history_opp || [] };
+    }
+
+    setTimeout(() => {
+      showMatchModal(outcome, delta, newMmr, secret, reason, myAtt, oppAtt, winnerName, p1Name, p2Name);
+    }, REVEAL_MS);
+    return;
+  }
+
+  if (st === "leaderboard_data") {
+      const tbody = document.getElementById("lb-body");
+      if(!data.leaderboard || data.leaderboard.length === 0) {
+          if(tbody) tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);text-align:center;">Belum ada data.</td></tr>';
+      } else {
+          const medals = ["🥇","🥈","🥉"];
+          if(tbody) {
+              tbody.innerHTML = data.leaderboard.map((p, i) => `
+                <tr style="${p.username === sessionUser ? 'background:rgba(83,141,78,0.14)' : ''}">
+                  <td>${medals[i] || (i+1)}</td>
+                  <td style="font-weight:600">${p.username}${p.username === sessionUser ? ' <span style="color:var(--green);font-size:0.72rem">(Kamu)</span>' : ''}</td>
+                  <td style="color:var(--gold);font-weight:700">${p.mmr}</td>
+                  <td style="color:var(--green)">${p.wins}</td>
+                  <td style="color:var(--red)">${p.losses}</td>
+                  <td style="color:var(--muted)">${p.draws}</td>
+                  <td>${p.total || 0}</td>
+                </tr>`).join("");
+          }
+      }
+      return; 
+  }
+}
+
+function setTimerDisplay(remaining) {
+  const disp = document.getElementById("timer-disp");
+  const fill = document.getElementById("timer-fill");
+  if (!disp || !fill) return;
+
+  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
+  const ss = String(remaining % 60).padStart(2, "0");
+  disp.textContent = `⏱ ${mm}:${ss}`;
+
+  const pct = (remaining / MATCH_DUR) * 100;
+  if(!isNaN(pct)) fill.style.width = pct + "%";
+
+  disp.classList.remove("warn", "crit");
+  if (remaining <= 30) {
+    fill.style.background = "var(--red)";
+    disp.classList.add("crit");
+  } else if (remaining <= 60) {
+    fill.style.background = "var(--yellow)";
+    disp.classList.add("warn");
+  } else {
+    fill.style.background = "var(--green)";
+  }
+}
+
+function showMatchModal(outcome, delta, newMmr, secret, reason, myAtt, oppAtt, winner=null, p1=null, p2=null) {
+  const icon = document.getElementById("m-icon"), title = document.getElementById("m-title"), sub = document.getElementById("m-sub"), word = document.getElementById("m-word"), dEl = document.getElementById("m-delta"), nEl = document.getElementById("m-newmmr"), card = document.getElementById("modal-card");
+  const sign = delta > 0 ? "+" : (delta === 0 ? "+" : "");
+
+  if (outcome === "WIN") {
+    icon.textContent = "🏆"; title.textContent = "KAMU MENANG!"; title.style.color = "var(--green)"; card.style.borderColor = "var(--green)"; sub.textContent = reason; dEl.className = "mmr-delta up";
+    sub.textContent += ` (Percobaanmu: ${myAtt}/6 | Lawan: ${oppAtt}/6)`;
+  } else if (outcome === "LOSE") {
+    icon.textContent = "💀"; title.textContent = "KAMU KALAH"; title.style.color = "var(--red)"; card.style.borderColor = "var(--red)"; sub.textContent = reason; dEl.className = "mmr-delta down";
+    sub.textContent += ` (Percobaanmu: ${myAtt}/6 | Lawan: ${oppAtt}/6)`;
+  } else if (outcome === "DRAW") {
+    icon.textContent = "🤝"; title.textContent = "SERI!"; title.style.color = "var(--yellow)"; card.style.borderColor = "var(--yellow)"; sub.textContent = reason; dEl.className = "mmr-delta draw";
+    sub.textContent += ` (Percobaanmu: ${myAtt}/6 | Lawan: ${oppAtt}/6)`;
+  } else if (outcome === "SPECTATOR") {
+    icon.textContent = "👁️"; title.style.color = "var(--gold)"; card.style.borderColor = "var(--gold)";
+    if (winner) { title.textContent = `${winner} MENANG!`; } else { title.textContent = "SERI!"; }
+    sub.textContent = `Pertandingan Selesai. (${p1}: ${myAtt}/6 | ${p2}: ${oppAtt}/6)`;
+  }
+
+  word.textContent = secret;
+  dEl.textContent = `${sign}${delta}`; nEl.textContent = newMmr;
+
+  const modal = document.getElementById("match-modal");
+  if(modal) modal.style.display = "flex";
+  
+  const mmrBox = document.getElementById("m-mmr-box");
+  const btn1 = document.getElementById("m-btn-1");
+  const btnReplay = document.getElementById("m-btn-replay");
+
+  if(btnReplay && replayData) { btnReplay.style.display = "inline-block"; }
+
+  if (isSpectating) {
+     if(mmrBox) mmrBox.style.display = "none";
+     if(btn1) btn1.style.display = "none";
+  } else {
+     if(mmrBox) mmrBox.style.display = "block";
+     if(btn1) btn1.style.display = "inline-block";
+  }
+}
+
+function showReplay() {
+    const modal = document.getElementById("match-modal"); if(modal) modal.style.display = "none"; 
+    const lock = document.getElementById("input-lock"); if(lock) lock.style.display = "none";
+    nav("replay");
+    buildBoard("replay-board-1", "rep1"); buildBoard("replay-board-2", "rep2");
+    document.getElementById("replay-p1-label").textContent = `Papan ${replayData.p1}`;
+    document.getElementById("replay-p2-label").textContent = `Papan ${replayData.p2}`;
+    document.getElementById("replay-secret").textContent = `Kata Rahasia: ${replayData.secret}`;
+
+    replayData.hist1.forEach((item, i) => { revealRow("rep1", i, item.guess.split(""), item.result, false); });
+    replayData.hist2.forEach((item, i) => { revealRow("rep2", i, item.guess.split(""), item.result, false); });
+}
+
+function modalToDashboard() {
+  const modal = document.getElementById("match-modal"); if(modal) modal.style.display = "none"; 
+  const lock = document.getElementById("input-lock"); if(lock) lock.style.display = "none";
+  inputLocked = false; isSpectating = false; nav("match"); fetchLeaderboard();
+}
+
+function modalPlayAgain() {
+  const modal = document.getElementById("match-modal"); if(modal) modal.style.display = "none"; 
+  const lock = document.getElementById("input-lock"); if(lock) lock.style.display = "none";
+  inputLocked = false; isSpectating = false; nav("match"); setTimeout(findMatch, 300);
+}
+
+function restoreDaily() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DAILY_KEY));
+    if (!saved || !saved.rows) return;
+    saved.rows.forEach((r, i) => revealRow("daily", i, r.g.split(""), r.res, false));
+    B.daily.r = saved.rows.length; B.daily.c = 0; B.daily.g = "";
+    if (saved.done) { 
+        B.daily.over = true; 
+        const bs = document.getElementById("btn-share"); if(bs) bs.style.display = "inline-block"; 
+        const ds = document.getElementById("daily-status-home"); if(ds) ds.textContent = "✨ Sudah dimainkan hari ini!"; 
+    }
+  } catch(e) {}
+}
+
+function saveDailyRow(guess, result) {
+  const d = JSON.parse(localStorage.getItem(DAILY_KEY) || '{"rows":[],"done":false}');
+  d.rows.push({ g: guess, res: result });
+  localStorage.setItem(DAILY_KEY, JSON.stringify(d));
+}
+
+function saveDailyFinished(won) {
+  const d = JSON.parse(localStorage.getItem(DAILY_KEY) || '{"rows":[],"done":false}');
+  d.done = true; d.won = won;
+  localStorage.setItem(DAILY_KEY, JSON.stringify(d));
+}
+
+function shareDaily() {
+  try {
+    const d = JSON.parse(localStorage.getItem(DAILY_KEY));
+    if (!d) return;
+    const date  = new Date().toLocaleDateString("id-ID");
+    const score = d.won ? d.rows.length : "X";
+    let   text  = `KATANYA Daily ${date} ${score}/6\n\n`;
+    d.rows.forEach(r => {
+      text += r.res.map(s => s === "correct" ? "🟩" : s === "present" ? "🟨" : "⬛").join("") + "\n";
+    });
+    navigator.clipboard.writeText(text).then(() => toast("Hasil disalin ke clipboard!", "success"));
+  } catch(e) { toast("Gagal menyalin.", "error"); }
+}
+
+function updateDailyCountdown() {
+  const now  = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const diff = next - now;
+  const hh   = String(Math.floor(diff / 3.6e6)).padStart(2, "0");
+  const mm   = String(Math.floor((diff % 3.6e6) / 6e4)).padStart(2, "0");
+  const ss   = String(Math.floor((diff % 6e4) / 1e3)).padStart(2, "0");
+  const el   = document.getElementById("daily-countdown");
+  if (el) el.textContent = `Kata baru dalam: ${hh}:${mm}:${ss}`;
+}

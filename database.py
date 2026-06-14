@@ -1,117 +1,76 @@
-/* ── RESET & VARS ────────────────────────── */
-:root {
-  --bg: #121213; --sidebar: #1e1e1f; --card: #262627;
-  --green: #538d4e; --yellow: #b59f3b; --absent: #3a3a3c;
-  --red: #c54242; --text: #ffffff; --muted: #979798;
-  --border: #3a3a3c; --gold: #ffb703;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+import os
+import json
 
-/* ── AUTH SCREEN ─────────────────────────── */
-#auth-screen { position: fixed; inset: 0; background: var(--bg); z-index: 999; display: flex; justify-content: center; align-items: center; }
-.auth-box { background: var(--sidebar); padding: 44px 40px; border-radius: 16px; box-shadow: 0 12px 40px rgba(0,0,0,0.6); width: 100%; max-width: 380px; text-align: center; }
-.auth-box h1 { color: var(--green); letter-spacing: 6px; font-size: 2rem; margin-bottom: 4px; }
-.auth-box p  { color: var(--muted); font-size: 0.88rem; margin-bottom: 28px; }
-.auth-box input { width: 100%; padding: 13px 14px; margin: 7px 0; border-radius: 8px; border: 2px solid var(--border); background: var(--bg); color: #fff; font-size: 1rem; }
-.auth-box input:focus { border-color: var(--green); outline: none; }
-.auth-divider { color: var(--muted); font-size: 0.8rem; margin: 12px 0 4px; }
+DB_FILE     = "katanya_users_db.json"
+K_FACTOR    = 32
+DEFAULT_MMR = 1000
 
-/* ── TOAST ───────────────────────────────── */
-#toast-root { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; min-width: 200px; }
-.toast { background: #fff; color: #111; padding: 11px 24px; border-radius: 8px; font-weight: 700; font-size: 0.92rem; box-shadow: 0 6px 20px rgba(0,0,0,0.45); animation: toastPop 2.8s ease forwards; white-space: nowrap; }
-.toast.error { background: #ff4444; color: #fff; }
-.toast.success { background: var(--green); color: #fff; }
-@keyframes toastPop { 0%{opacity:0;transform:translateY(-14px) scale(0.95);} 12%{opacity:1;transform:translateY(0) scale(1);} 80%{opacity:1;} 100%{opacity:0;transform:translateY(-8px);} }
+PLAYER_DB: dict = {}
 
-/* ── PING ────────────────────────────────── */
-#ping-indicator { position: fixed; top: 16px; right: 24px; color: var(--green); font-size: 0.85rem; font-weight: bold; z-index: 999; }
+def load_db():
+    global PLAYER_DB
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r") as f:
+                PLAYER_DB = json.load(f)
+        except Exception:
+            PLAYER_DB = {}
+    else:
+        PLAYER_DB = {}
 
-/* ── SIDEBAR ─────────────────────────────── */
-.sidebar { width: 248px; background: var(--sidebar); display: flex; flex-direction: column; padding: 22px 14px; border-right: 1px solid #2a2a2b; flex-shrink: 0; }
-.logo { font-size: 1.9rem; font-weight: 900; letter-spacing: 5px; color: var(--green); text-align: center; margin-bottom: 6px; }
-.logo-sub { font-size: 0.68rem; color: var(--muted); text-align: center; letter-spacing: 2px; margin-bottom: 22px; }
-.profile-badge { background: var(--bg); border-radius: 8px; padding: 12px 14px; margin-bottom: 24px; border: 1px solid var(--border); font-size: 0.88rem; line-height: 1.7; }
-.menu-btn { background: none; border: none; color: var(--muted); padding: 12px 18px; text-align: left; font-size: 0.97rem; font-weight: 600; cursor: pointer; border-radius: 8px; margin-bottom: 4px; transition: all 0.15s; display: flex; align-items: center; gap: 10px; }
-.menu-btn:hover, .menu-btn.active { background: var(--card); color: var(--text); }
-.menu-btn.active { border-left: 4px solid var(--green); padding-left: 14px; }
-.menu-btn.danger { color: var(--red); margin-top: auto; }
+def save_db():
+    try:
+        with open(DB_FILE, "w") as f:
+            json.dump(PLAYER_DB, f, indent=4)
+    except Exception: pass
 
-/* ── MAIN CONTENT ────────────────────────── */
-.main { flex: 1; padding: 36px; display: flex; justify-content: center; align-items: flex-start; overflow-y: auto; position: relative; }
-.panel { display: none; width: 100%; max-width: 660px; flex-direction: column; align-items: center; animation: fadeUp 0.25s ease; }
-.panel.active { display: flex; }
-@keyframes fadeUp { from {opacity:0;transform:translateY(10px);} to {opacity:1;transform:translateY(0);} }
-.card { background: var(--card); border-radius: 14px; padding: 28px; width: 100%; margin-bottom: 20px; }
-.card h2 { font-size: 1.25rem; margin-bottom: 8px; }
+load_db()
 
-/* ── BUTTONS ─────────────────────────────── */
-.btn { background: var(--green); color: #fff; border: none; padding: 14px 40px; font-size: 1.05rem; font-weight: 700; border-radius: 8px; cursor: pointer; transition: all 0.2s; margin-top: 14px; display: inline-block; }
-.btn:hover:not(:disabled) { background: #5fa356; transform: translateY(-1px); }
-.btn:disabled { background: var(--absent); color: var(--muted); cursor: not-allowed; transform: none; }
-.btn.full { width: 100%; margin-top: 10px; }
-.btn.ghost { background: var(--absent); }
-.btn.gold { background: var(--gold); color: #000; }
-.btn.sm { padding: 9px 20px; font-size: 0.88rem; margin-top: 0; }
+def get_or_create_player(username: str) -> dict:
+    if username not in PLAYER_DB:
+        PLAYER_DB[username] = {"password": "", "mmr": DEFAULT_MMR, "wins": 0, "losses": 0, "draws": 0, "total": 0}
+    if "mmr" not in PLAYER_DB[username]:
+        PLAYER_DB[username]["mmr"] = PLAYER_DB[username].pop("elo", DEFAULT_MMR)
+        PLAYER_DB[username]["total"] = PLAYER_DB[username].get("wins", 0) + PLAYER_DB[username].get("losses", 0) + PLAYER_DB[username].get("draws", 0)
+    return PLAYER_DB[username]
 
-/* ── BOARD & TILES ───────────────────────── */
-.board { display: grid; grid-template-rows: repeat(6,1fr); gap: 5px; margin: 18px auto; width: max-content; }
-.board-row { display: grid; grid-template-columns: repeat(5,1fr); gap: 5px; }
-.tile { width: 54px; height: 54px; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 1.75rem; font-weight: 700; text-transform: uppercase; user-select: none; transition: border-color 0.08s; }
-.tile.sm { width: 42px; height: 42px; font-size: 1.3rem; }
-.tile.pop { animation: pop 0.1s ease; border-color: #606062; }
-@keyframes pop { 50% { transform: scale(1.12); } }
-.tile.flip { animation: flip 0.52s ease forwards; }
-@keyframes flip { 0%{transform:rotateX(0);} 45%{transform:rotateX(90deg);background:transparent;} 55%{transform:rotateX(90deg);} 100%{transform:rotateX(0);border-color:transparent;color:#fff;} }
-.board-row.shake { animation: shake 0.45s ease; }
-@keyframes shake { 15%,45%,75%{transform:translateX(-6px)} 30%,60%,90%{transform:translateX(6px)} }
+def expected_score(mmr_a: float, mmr_b: float) -> float:
+    return 1.0 / (1.0 + 10 ** ((mmr_b - mmr_a) / 400))
 
-/* ── KEYBOARD ────────────────────────────── */
-.keyboard { width: 100%; max-width: 490px; display: flex; flex-direction: column; gap: 5px; margin-top: 14px; }
-.kb-row { display: flex; justify-content: center; gap: 4px; }
-.key { background: #818384; color: #fff; border: none; border-radius: 4px; height: 52px; flex: 1; font-weight: 700; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; justify-content: center; text-transform: uppercase; transition: background 0.15s; user-select: none; }
-.key.wide { flex: 1.5; font-size: 0.78rem; }
-.key:hover { background: #9a9c9d; }
+def update_mmr(winner: str, loser: str, is_draw: bool = False) -> tuple[int, int]:
+    wp = get_or_create_player(winner)
+    lp = get_or_create_player(loser)
 
-/* ── ARENA ───────────────────────────────── */
-.arena-wrap { display: flex; gap: 44px; justify-content: center; align-items: flex-start; width: 100%; max-width: 920px; }
-.arena-col { display: flex; flex-direction: column; align-items: center; }
-.arena-header-col { flex: 1; }
+    exp_w = expected_score(wp["mmr"], lp["mmr"])
+    exp_l = expected_score(lp["mmr"], wp["mmr"])
 
-.timer-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.timer-display { font-size: 1.55rem; font-weight: 800; padding: 6px 22px; border-radius: 30px; border: 2px solid var(--green); background: var(--card); letter-spacing: 2px; }
-.timer-display.warn { border-color: var(--yellow); color: var(--yellow); }
-.timer-display.crit { border-color: var(--red); color: var(--red); animation: pulse 0.55s infinite alternate; }
-@keyframes pulse { to { transform: scale(1.04); } }
-.timer-bar { width: 280px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
-.timer-fill { height: 100%; background: var(--green); border-radius: 3px; transition: width 1s linear, background 0.4s; }
+    score_w, score_l = (0.5, 0.5) if is_draw else (1.0, 0.0)
 
-/* ── CHAT ────────────────────────────────── */
-.chat-wrap { width: 100%; max-width: 760px; margin-top: 24px; background: var(--card); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-.chat-msgs { flex: 1; height: 140px; overflow-y: auto; font-size: 0.88rem; padding: 10px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border); }
-.chat-msg { margin-bottom: 6px; line-height: 1.4; word-wrap: break-word;}
-.chat-msg .sender { font-weight: 700; color: var(--green); margin-right: 6px; }
-.chat-input-row { display: flex; gap: 8px; }
-.chat-input-row input { flex: 1; padding: 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); color: #fff; outline: none; }
-.chat-input-row input:focus { border-color: var(--green); }
+    delta_w = round(K_FACTOR * (score_w - exp_w))
+    delta_l = round(K_FACTOR * (score_l - exp_l))
 
-/* ── MATCH MODAL ─────────────────────────── */
-#match-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.82); z-index: 2000; justify-content: center; align-items: center; backdrop-filter: blur(5px); }
-.modal-box { background: var(--sidebar); border-radius: 18px; padding: 44px 48px; width: 100%; max-width: 420px; text-align: center; box-shadow: 0 16px 50px rgba(0,0,0,0.7); border: 2px solid var(--border); animation: fadeUp 0.3s ease; }
-.modal-icon { font-size: 4.5rem; margin-bottom: 12px; }
-.modal-title { font-size: 2.1rem; font-weight: 900; letter-spacing: 2px; margin-bottom: 6px; }
-.modal-sub { color: var(--muted); font-size: 0.92rem; margin-bottom: 20px; }
-.modal-secret{ font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; }
-.modal-word { font-size: 1.6rem; font-weight: 800; letter-spacing: 8px; color: var(--gold); margin-bottom: 22px; }
-.mmr-box { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 26px; }
-.mmr-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
-.mmr-delta { font-size: 2.2rem; font-weight: 900; margin: 4px 0; }
-.mmr-delta.up { color: var(--green); }
-.mmr-delta.down { color: var(--red); }
-.mmr-delta.draw { color: var(--yellow); }
-.mmr-new { font-size: 0.9rem; }
+    wp["mmr"] = max(0, wp["mmr"] + delta_w)
+    lp["mmr"] = max(0, lp["mmr"] + delta_l)
 
-.tbl { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-top: 16px; }
-.tbl th { padding: 10px 10px; color: var(--muted); border-bottom: 1px solid var(--border); text-align: left; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.8px; }
-.tbl td { padding: 13px 10px; border-bottom: 1px solid #1f1f20; }
-#input-lock { display: none; position: fixed; inset: 0; z-index: 500; pointer-events: all; cursor: not-allowed; }
+    if is_draw:
+        wp["draws"] = wp.get("draws", 0) + 1
+        lp["draws"] = lp.get("draws", 0) + 1
+    else:
+        wp["wins"] = wp.get("wins", 0) + 1
+        lp["losses"] = lp.get("losses", 0) + 1
+
+    wp["total"] = wp.get("total", 0) + 1
+    lp["total"] = lp.get("total", 0) + 1
+
+    save_db()
+    return delta_w, delta_l
+
+def get_leaderboard_data(top: int = 10) -> list:
+    players = sorted(PLAYER_DB.items(), key=lambda x: x[1].get("mmr", DEFAULT_MMR), reverse=True)
+    result  = []
+    for i, (uname, data) in enumerate(players[:top]):
+        result.append({
+            "rank": i + 1, "username": uname, "mmr": data.get("mmr", DEFAULT_MMR),
+            "wins": data.get("wins", 0), "losses": data.get("losses", 0), "draws": data.get("draws", 0), "total": data.get("total", 0),
+        })
+    return result

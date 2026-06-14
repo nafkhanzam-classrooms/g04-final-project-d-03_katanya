@@ -1,7 +1,6 @@
 # KATANYA - Dokumentasi Front-End
 
-Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `style.css` di folder `front_end`.
-Setiap blok disertai potongan kode dan penjelasan baris per baris.
+Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `style.css`.
 
 ---
 

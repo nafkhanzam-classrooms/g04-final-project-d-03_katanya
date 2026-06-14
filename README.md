@@ -40,8 +40,6 @@ Dokumentasi ini menjelaskan semua bagian utama `index.html`, `script.js`, dan `s
 - `<meta name="viewport" content="width=device-width, initial-scale=1.0">` — Membuat responsif pada perangkat mobile.
 - `<title>...</title>` — Judul halaman yang ditampilkan pada tab browser.
 - `<link rel="stylesheet" href="style.css">` — Memuat stylesheet utama.
-- `</head>` — Menutup blok head.
-- `<body>` — Mulai konten halaman.
 
 ### Overlay helper dan toast
 
